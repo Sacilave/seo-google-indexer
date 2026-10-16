@@ -9,61 +9,98 @@
 [![Node: >=18.0.0](https://img.shields.io/badge/Node.js-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Google Indexing API](https://img.shields.io/badge/Google%20API-v3-orange.svg)](https://developers.google.com/search/apis/indexing-api/v3/quickstart)
 
-[特性介绍](#-核心特性) • [一键安装](#-一键安装与使用) • [快速接入](#-网站极速接入两步走) • [隐私与安全](#-隐私安全与风控规范) • [常见问题](#-常见问题-faq)
+[核心特性](#-核心特性) • [人工操作清单 (只需做2步)](#-人工操作清单极为简短) • [一键安装与使用](#-一键安装与使用) • [高可靠性设计](#-工程可靠性与风控设计) • [常见问题](#-常见问题-faq)
 
 </div>
 
 ---
 
-## 📖 简介
+## 📖 原理说明：我们是在往 GSC 提交吗？
 
-在网站部署或发布更新时，传统的搜索引擎爬虫往往需要数天甚至数周才会重新索引你的新网页。  
-**`seo-google-indexer`** 基于 Google 官方提供的 `Web Search Indexing API (v3)`，使用服务账号（Service Account）凭据，以程序化方式直接通知 Google 调度系统立即抓取。
+**不是普通 GSC 提交，而是 Google 官方底层的 `Web Search Indexing API`。**
 
-结合本工具，爬虫通常会在**数分钟到数小时内**前来访问页面，大幅加速 SEO 收录效率。
+- **在 GSC 后台提交 Sitemap**：相当于递交一张“建议清单”，爬虫何时抓取完全看 Google 心情，往往需要等待**数天至数周**。
+- **调用 Indexing API 实时通知（本项目）**：直接向 Google 调度系统发送 `URL_UPDATED` 实时事件，通知 Googlebot *“页面已更新，请立刻派蜘蛛来抓”*，通常在**数分钟到数小时内**就会前来抓取！
 
 ---
 
 ## ✨ 核心特性
 
-- 🚀 **极速抓取通知**：告别漫长等待，更新即推，直达 Googlebot 调度中心。
-- 📦 **零复杂第三方依赖**：纯原生 Node.js 实现（利用内置 `crypto`, `net`, `fetch`），轻量稳定，不依赖笨重的官方全家桶 SDK。
-- 🌐 **智能代理自动识别**：国内开发环境自动识别 Clash / Mihomo / v2ray 本地代理端口（7897, 7890, 10809 等），告别连接超时。
-- 🔒 **隐私与安全第一**：
-  - 绝不硬编码任何私钥或邮箱。
-  - 支持多阶凭据隔离（优先读取项目根目录，其次读取系统用户全局目录）。
-  - 自动加固 `.gitignore`，杜绝密钥泄露风险。
-- 🗺️ **多技术栈 Sitemap 适配**：自动智能探测 `public/sitemap.xml`、`dist/sitemap.xml` 等路径，开箱即用。
+- 🚀 **秒级/小时级爬虫唤起**：跳过漫长被动等待，主动直通 Googlebot 调度中心。
+- 🎯 **全场景输入支持**：
+  - **本地模式**：自动定位 `public/sitemap.xml` 或 `dist/sitemap.xml`。
+  - **多地图嵌套递归**：自动展开 `<sitemapindex>` 内部的所有子地图。
+  - **线上地图模式**：无需本地 build，直接推线上最新地址：`npm run seo:push https://example.com/sitemap.xml`。
+  - **单页面即时模式**：发完单篇新文章，立即单推：`npm run seo:push https://example.com/blog/my-post`。
+- 🛡️ **工业级可靠性保障**：
+  - 内置 **150ms 请求防抖平滑延时**，避免并发过高被限流。
+  - 遇到 `429 Too Many Requests` **自动指数退避重试**。
+  - **单日 200 条硬配额自动熔断保护**（超出自动截断并警告，防止刷屏报错）。
+  - 支持 `--dry-run` 预览演练模式（零配额消耗）。
+- 🌐 **国内网络免配置适配**：自动识别 Clash / Mihomo / v2ray 本地代理端口（7897, 7890, 10809 等）。
+- 🔒 **严格的隐私与安全保护**：零敏感信息硬编码，自动维护 `.gitignore`。
+
+---
+
+## 📋 人工操作清单（极为简短）
+
+除日常发布完全自动外，只有以下两个步骤需要人类操作：
+
+```mermaid
+flowchart LR
+    A["步骤 1: 获取凭据<br><b>(终身仅需 1 次)</b><br>全矩阵所有网站永久复用"] --> B["步骤 2: GSC 授权所有者<br><b>(新网站仅需 1 次)</b><br>耗时 30 秒粘贴邮箱"] --> C["步骤 3: 日常自动推送<br><b>(100% 全自动)</b><br>npm run seo:push"]
+```
+
+### 步骤 1：获取 Google 服务账号凭据（🌟 终身只需 1 次，全站通用）
+在 [Google Cloud Console](https://console.cloud.google.com/) 启用 Indexing API 并下载服务账号 JSON 密钥。  
+*(详细保姆级点击向导请阅读 [references/gsc-auth-guide.md](references/gsc-auth-guide.md))*
+
+- **重隐私用户推荐**：将下载的文件重命名为 `service-account.json`，直接放入电脑用户全局目录：
+  - **Windows**: `C:\Users\<你的用户名>\.config\google-seo\service-account.json`
+  - **macOS/Linux**: `~/.config/google-seo/service-account.json`  
+  *(后续无论开多少个新网站，脚本会自动跨项目读取，永不需要在项目里复制密钥！)*
+
+---
+
+### 步骤 2：在 Google Search Console 授权机器人（🌟 每个新网站只做 1 次，耗时 30 秒）
+为了让 Google 确认你拥有该网站的管辖权：
+1. 打开 [Google Search Console](https://search.google.com/search-console)，切换到当前网站属性。
+2. 左侧点击 **「设置」 ➡️ 「用户和权限」 ➡️ 「添加用户」**。
+3. 粘贴你的机器人服务账号邮箱（运行 `npm run seo:push -- --doctor` 会直接高亮打印出来）。
+4. **权限务必选择「所有者 (Owner)」**，点击保存。
+
+---
+
+### 步骤 3：日常发布与推送（🤖 100% 全自动化）
+网站发布后，运行一条命令即可：
+```bash
+npm run seo:push
+```
+或者在 Agent 中直接对它说：“帮我推送到 Google 抓取”。
 
 ---
 
 ## 🛠️ 一键安装与使用
 
-### 方式 1：作为 Antigravity / Claude Code Skill 安装（推荐）
+### 方式 1：作为 Antigravity / Claude Code 全局技能安装（推荐）
 
-直接在终端或 Agent 中运行安装：
-
+直接克隆本仓库到技能目录：
 ```bash
-# 复制或克隆本仓库到技能目录
 git clone https://github.com/<your-username>/seo-google-indexer.git ~/.gemini/config/skills/seo-google-indexer
 ```
 
-安装后即可直接在对话中通过自然语言或命令触发：
-```text
-/seo-google-indexer init      # 为当前项目一键配置推送环境
-/seo-google-indexer push      # 批量推送 sitemap.xml 到 Google
-/seo-google-indexer status    # 检查凭据与网络就绪状态
-/seo-google-indexer gsc       # 查看 Google Search Console 授权指引
-```
+在对话中随时调用：
+- `/seo-google-indexer init`：自动为当前项目注入脚本、配置 `package.json` 并加固 `.gitignore`。
+- `/seo-google-indexer push`：执行推送（支持传入远程链接或单网页 URL）。
+- `/seo-google-indexer doctor`：自检环境、网络代理连通性并高亮打印授权邮箱。
+- `/seo-google-indexer gsc`：快速调出 30 秒授权指南与排查方案。
 
 ---
 
-### 方式 2：作为独立项目脚本使用
+### 方式 2：作为独立项目脚本
 
-即使不作为 Agent Skill，你也可以直接将本仓库作为独立脚本集成进任何前端工程：
-
-1. 将 `templates/google-index.template.js` 复制到你项目的 `scripts/google-index.js`。
-2. 在 `package.json` 的 `scripts` 中添加：
+1. 将 `templates/google-index.template.js` 复制为你项目中的 `scripts/google-index.js`。
+2. 在 `package.json` 中配置：
    ```json
    {
      "scripts": {
@@ -71,55 +108,36 @@ git clone https://github.com/<your-username>/seo-google-indexer.git ~/.gemini/co
      }
    }
    ```
-3. 执行推送：
+3. 运行体验：
    ```bash
+   # 1. 运行自检与查看授权邮箱
+   npm run seo:push -- --doctor
+
+   # 2. 演练预览（不消耗配额）
+   npm run seo:push -- --dry-run
+
+   # 3. 正式全量推送
    npm run seo:push
+
+   # 4. 指定推线上站点地图 / 单篇新文章
+   npm run seo:push https://example.com/sitemap.xml
+   npm run seo:push https://example.com/blog/my-latest-post
    ```
 
 ---
 
-## 🚀 网站极速接入（两步走）
+## 🛡️ 工程可靠性与风控设计
 
-### 第一步：获取凭据（一次性准备）
-
-你可以选择以下两种方式之一准备 Google Cloud 服务账号凭据：
-
-- **重隐私用户（推荐）**：  
-  在 Google Cloud Console 创建服务账号并下载 JSON 密钥，重命名为 `service-account.json`，放置于电脑的全局配置目录：  
-  `~/.config/google-seo/service-account.json`（Windows 对应 `C:\Users\<你的用户名>\.config\google-seo\service-account.json`）。  
-  *所有站点均可永久复用此文件，无需在每个代码仓库中复制密钥！*
-
-- **交互式录入**：  
-  在 Agent 中运行 `/seo-google-indexer init`，Agent 会主动询问你的凭据存放路径并协助完成安全就绪检查。
-
----
-
-### 第二步：在 Google Search Console (GSC) 授权
-
-1. 登录 [Google Search Console](https://search.google.com/search-console)，选择你的站点属性。
-2. 点击左下角 **「设置」 (Settings)** ➡️ **「用户和权限」 (Users and permissions)**。
-3. 点击 **「添加用户」 (Add user)**：
-   - **电子邮件地址**：输入你的机器人服务账号邮箱（例如 `xxx@xxx.iam.gserviceaccount.com`）。
-   - **权限**：**必须选择「所有者」 (Owner)**。
-   - 点击保存。
-
-> ⚠️ **重要**：权限必须是「所有者」，否则 Google API 会抛出 `403 Permission Denied` 错误。
-
----
-
-## 🔐 隐私安全与风控规范
-
-1. **防泄漏机制**：
-   - 项目根目录的 `.gitignore` 务必包含：
-     ```gitignore
-     *service-account*.json
-     *indexer*.json
-     *.secret.json
-     ```
-   - **切勿将任何 `.json` 私钥文件提交至公开 GitHub 仓库。**
-2. **API 调用配额**：
-   - Google Cloud 项目默认配额为 **200 个 URL / 天**（所有关联站点共享）。
-   - 个人独立站矩阵日常更新量通常在 10~50 个 URL 之间，配额完全充裕。
+1. **防凭据泄露**：
+   项目 `.gitignore` 强制包含：
+   ```gitignore
+   *service-account*.json
+   *indexer*.json
+   *.secret.json
+   ```
+2. **配额与频控**：
+   - Google Indexing API 单日项目总配额上限为 **200 条 URL**（次日 UTC 午夜自动重置）。
+   - 脚本内置单日超 200 条自动安全截取与告警，并内置 150ms 平滑延时，彻底杜绝瞬间刷爆导致 429 失败。
 
 ---
 
@@ -127,12 +145,17 @@ git clone https://github.com/<your-username>/seo-google-indexer.git ~/.gemini/co
 
 <details>
 <summary><b>Q: 出现 403 Permission Denied 是什么原因？</b></summary>
-A: 通常是因为在 Google Search Console 中没有将服务账号添加为「所有者 (Owner)」权限，或者当前提交的 URL 协议/域名与 GSC 中绑定的属性不完全一致。
+A: 这是最常见的情况，100% 是因为在 Google Search Console 中未将服务账号添加为「所有者 (Owner)」（误选成了“完整”或“受限”权限）。请进入 GSC 权限列表将其更改为「所有者」。
 </details>
 
 <details>
-<summary><b>Q: 国内本地网络连接超时怎么办？</b></summary>
-A: 脚本已内置针对 7897、7890、10809 等常见代理端口的智能环回探测；也可以通过系统环境变量指定代理：
+<summary><b>Q: 提示「未检测到有效 sitemap.xml」怎么办？</b></summary>
+A: 如果是刚拉取的项目，请先运行 <code>npm run build</code> 生成构建产物；或者如果你网站已经上线，可以直接传入线上网址：<code>npm run seo:push https://yoursite.com/sitemap.xml</code>。
+</details>
+
+<details>
+<summary><b>Q: 国内代理连不上 Google API 怎么办？</b></summary>
+A: 脚本已内置针对 7897、7890、10809 等常见代理端口的智能环回探测；也可以手动指定环境变量：
 <code>set HTTPS_PROXY=http://127.0.0.1:7890</code>（Windows）或 <code>export HTTPS_PROXY=http://127.0.0.1:7890</code>（macOS/Linux）。
 </details>
 

@@ -3,99 +3,96 @@ name: seo-google-indexer
 description: >-
   Google 官方秒级收录推送工具 (Google Indexing API v3)。
   适用于任意前端技术栈（Astro、Next.js、Nuxt、Vue、HTML 等）。
-  自动化全流程：自动询问配置凭据（支持交互式录入或自主配置）、项目脚本初始化、
-  解析 sitemap.xml 提取全站 URL 并批量向 Googlebot 提交更新通知、
-  智能检测网络代理、自动配置 .gitignore 严格防止凭据泄露。
+  自动化全流程：自动探测凭据（支持交互式或自主配置）、项目初始化（脚本注入与 .gitignore 安全加固）、
+  解析本地/线上/嵌套 sitemap.xml 或单条 URL 批量向 Googlebot 提交更新通知、
+  内置智能网络代理探测、429 重试、防抖限速、每日 200 条配额熔断保护与 dry-run 演练。
   触发场景：接入 Google 收录、配置 google-index、推送 sitemap 到 Google、seo:push、Google 秒级抓取。
 user-invocable: true
-argument-hint: "[init | push | status | gsc]"
+argument-hint: "[init | push | doctor | gsc | --dry-run]"
 license: MIT
 metadata:
   category: seo
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Google 秒级收录推送技能 (Google Indexing API)
 
-本技能通过官方 `Google Web Search Indexing API (v3)`，使用预先生成的服务账号（Service Account）凭据，以程序化方式通知 Google 官方爬虫加速抓取网站更新。
+本技能通过官方 `Google Web Search Indexing API (v3)`，使用预先生成的服务账号凭据直接通知 Google 官方爬虫加速抓取网站。
 
 ---
 
-## 🔒 隐私与安全性原则（零硬编码、零隐私泄漏）
+## 🔒 隐私与安全性原则（零隐私泄漏）
 
-- **严禁在代码、技能文档或公开仓库中硬编码任何真实的邮箱地址、项目 ID 或私钥内容。**
+- **严禁在代码、技能文档或公开对话中硬编码任何真实用户的邮箱地址、项目 ID 或私钥内容。**
 - **凭据探测优先级**：
   1. 当前项目根目录的 `./service-account.json`
   2. 用户本机全局目录 `~/.config/google-seo/service-account.json`
 - **重隐私用户保护策略**：
-  - 如果未检测到凭据，**优先提供让用户自行放置文件的选项**，绝不强制要求在对话框粘贴敏感密钥。
-  - 自动向项目根目录的 `.gitignore` 注入安全规则，彻底避免凭据意外提交到代码仓库。
+  - 如果未检测到凭据，**优先告知用户自行在本地放置文件的路径**，不强制在对话中索要敏感密钥。
+  - 自动向当前项目根目录的 `.gitignore` 注入安全规则，防止私钥上传到 Git 仓库。
 
 ---
 
-## 常见命令与执行工作流
+## 🎯 核心工作流与 Agent 对话交互规范
 
 ### 1. 接入与初始化 (`/seo-google-indexer init`)
 
-为当前项目一键配置收录推送能力。
+为当前项目一键配置秒级收录推送环境。
 
-#### 流程步骤：
+#### Agent 交互流程：
 
-1. **凭据探测与用户沟通**：
-   - 首先静默检查本机是否存在全局凭据：`~/.config/google-seo/service-account.json` 或当前项目下的 `service-account.json`。
-   - **若已存在凭据**：直接读取 `client_email`，向用户确认，并输出对应 GSC 授权提示。
-   - **若不存在凭据**：
-     - **不可直接报错**，向用户提供两个友好选项：
-       - **选项 A（自主配置 - 重隐私推荐）**：告知用户将 Google Cloud 下载的 JSON 凭据重命名为 `service-account.json`，放置在用户全局目录 `~/.config/google-seo/service-account.json`（或当前项目根目录下）。
-       - **选项 B（交互式辅助）**：若用户主动希望协助配置，指导用户提供凭据路径或相关内容并安全存入本机全局目录。
+1. **静默探测凭据**：
+   - 检查本机 `~/.config/google-seo/service-account.json` 或项目下的 `service-account.json`。
+   - **Case A（凭据已存在）**：
+     - 读取该 JSON 内的 `client_email`。
+     - **在对话中以高亮代码块形式直接展示该邮箱**，并给出清晰指引：
+       ```text
+       🔑 已检测到本地 Google 服务账号凭据！
+       👉 机器人邮箱: `your-bot@your-project.iam.gserviceaccount.com`
+       
+       【只需 30 秒手工操作】
+       请前往 Google Search Console (https://search.google.com/search-console)：
+       1. 选择当前网站属性 -> 点击「设置」 -> 「用户和权限」 -> 「添加用户」
+       2. 粘贴上述邮箱，并将权限设为「所有者 (Owner)」保存即可。
+       ```
+   - **Case B（未检测到凭据）**：
+     - 友好询问并提供方案：
+       - **推荐方案（自主配置，保护隐私）**：请用户参照 `references/gsc-auth-guide.md`，将 Google Cloud 下载的 JSON 命名为 `service-account.json` 放置于用户全局目录 `~/.config/google-seo/service-account.json`。
+       - **交互方案**：若用户希望直接协助，可引导用户提供路径。
 
-2. **写入脚手架脚本**：
-   - 在当前项目根目录创建 `scripts/google-index.js`（复制自 `templates/google-index.template.js`）。
-
-3. **配置 `package.json`**：
-   - 读取当前项目的 `package.json`，在 `scripts` 对象中自动增加：
-     ```json
-     "scripts": {
-       "seo:push": "node scripts/google-index.js"
-     }
-     ```
-
-4. **安全加固 `.gitignore`**：
-   - 检查并确保项目根目录的 `.gitignore` 包含以下敏感文件过滤规则：
-     ```gitignore
-     *service-account*.json
-     *indexer*.json
-     *.secret.json
-     ```
-
-5. **GSC 授权引导**：
-   - 明确告知用户当前服务账号邮箱，并提醒至 [Google Search Console](https://search.google.com/search-console) 将该邮箱添加为当前域名的**所有者 (Owner)**。
+2. **注入推送脚本与配置**：
+   - 将 `templates/google-index.template.js` 复制到当前项目 `scripts/google-index.js`。
+   - 在项目的 `package.json` 的 `scripts` 中注入 `"seo:push": "node scripts/google-index.js"`。
+   - 检查 `.gitignore`，自动追加安全规则（`*service-account*.json`, `*.secret.json` 等）。
 
 ---
 
-### 2. 执行批量推送 (`/seo-google-indexer push`)
+### 2. 批量推送 (`/seo-google-indexer push`)
 
-将网站最新生成的 `sitemap.xml` 批量推送到 Googlebot。
+将网站页面的更新实时通知 Googlebot。
 
-#### 流程步骤：
+#### 支持的多元模式：
+- **默认模式**：`npm run seo:push`（自动探测 `public/sitemap.xml` 或 `dist/sitemap.xml`，自动展开嵌套索引文件）
+- **线上地图模式**：`npm run seo:push https://example.com/sitemap.xml`（免本地 build，直接推线上最新链接）
+- **单页面即时模式**：`npm run seo:push https://example.com/blog/new-post`（新发单篇博客秒级单推）
+- **演练预览模式**：`npm run seo:push -- --dry-run`（仅打印提取的 URL 和数量，不消耗每日 API 配额）
 
-1. 检查凭据有效性。
-2. 自动定位站点地图文件（优先扫描 `public/sitemap.xml`、`dist/sitemap.xml`、`dist/client/sitemap.xml` 等）。若未找到，提示用户先执行 `npm run build`。
-3. 执行 `node scripts/google-index.js`（或直接使用本技能内置推送逻辑）。
-4. 输出推送统计结果（已推送总数、成功数、失败数、每日配额提醒）。
-
----
-
-### 3. 环境与就绪检查 (`/seo-google-indexer status`)
-
-诊断当前推送环境是否就绪：
-- 检查凭据是否存在与格式是否合法。
-- 测试网络代理连通性（7897 / 7890 / 10809 端口环回探测）。
-- 测试能否通过 JWT 成功与 Google 换取 access_token。
+#### 可靠性保障：
+- **防并发限频**：每条推送微延时 150ms，遇 429 自动指数退避重试。
+- **每日 200 条配额保护**：超过 200 条自动安全截断，防止超额刷屏报错。
 
 ---
 
-### 4. 授权指引 (`/seo-google-indexer gsc`)
+### 3. 环境与授权诊断 (`/seo-google-indexer doctor`)
 
-快速展示 GSC 授权说明及常见问题（如 403 权限不足、429 配额耗尽处理）。
-可参考 `references/gsc-auth-guide.md`。
+用于一键自检：
+- Node.js 环境版本（>= 18.0.0）。
+- 凭据合法性校验并打印服务账号邮箱。
+- 自动测试本地代理端口（7897 / 7890 / 10809）。
+- 测试与 Google OAuth2 交换 access_token 的连通性。
+
+---
+
+### 4. GSC 指引速查 (`/seo-google-indexer gsc`)
+
+快速展示 GSC 授权 3 步走以及 403 / 429 常见排查手册（引用 `references/gsc-auth-guide.md`）。
