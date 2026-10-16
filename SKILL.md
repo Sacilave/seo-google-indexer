@@ -1,12 +1,10 @@
 ---
 name: seo-google-indexer
 description: >-
-  Google 官方秒级收录推送工具 (Google Indexing API v3)。
-  适用于任意前端技术栈（Astro、Next.js、Nuxt、Vue、HTML 等）。
-  自动化全流程：自动探测凭据（支持交互式或自主配置）、项目初始化（脚本注入与 .gitignore 安全加固）、
-  解析本地/线上/嵌套 sitemap.xml 或单条 URL 批量向 Googlebot 提交更新通知、
-  内置智能网络代理探测、429 重试、防抖限速、每日 200 条配额熔断保护与 dry-run 演练。
-  触发场景：接入 Google 收录、配置 google-index、推送 sitemap 到 Google、seo:push、Google 秒级抓取。
+  Automate URL submission to Google Search Indexing API v3.
+  Dispatches real-time crawl notifications directly to Googlebot from local, remote, or nested sitemaps, as well as single URLs.
+  Supports zero-dependency proxy tunneling, 150ms rate limiting, 429 auto-retries, and a 200 URLs/day quota limit.
+  Triggers on: google indexing, indexing api, push sitemap, seo:push, fast indexing, index now google, submit url to google.
 user-invocable: true
 argument-hint: "[init | push | doctor | gsc | --dry-run]"
 license: MIT
