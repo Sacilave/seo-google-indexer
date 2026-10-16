@@ -15,6 +15,18 @@
 
 ---
 
+## ⚡ 一键安装 Prompt（直接发给你的 AI Assistant）
+
+如果你使用的是 **Antigravity** 或 **Claude Code**，无需手动执行繁琐命令，只需将以下 Prompt 复制并发送给你的 AI 编程助手：
+
+```markdown
+请帮我安装并配置这个 Google 秒级收录推送 Skill：
+https://github.com/Sacilave/seo-google-indexer.git
+安装后请帮我自检环境并初始化当前项目的收录推送脚本。
+```
+
+---
+
 ## 📖 原理说明：我们是在往 GSC 提交吗？
 
 **不是普通 GSC 提交，而是 Google 官方底层的 `Web Search Indexing API`。**
