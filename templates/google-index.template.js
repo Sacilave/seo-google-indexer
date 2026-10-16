@@ -3,46 +3,133 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
 import net from 'node:net';
+import http from 'node:http';
+import https from 'node:https';
+import tls from 'node:tls';
+
+let activeProxy = null;
 
 /**
- * 智能网络代理检测与配置（兼容 Clash / Mihomo / v2ray / 系统环境代理）
+ * 智能网络代理检测（零外部依赖，自动适配本地 Clash / Mihomo / v2ray 端口）
  */
 async function setupProxy() {
   const envProxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY;
-  let targetProxy = envProxy;
-
-  if (!targetProxy) {
-    const probePort = (port) =>
-      new Promise((resolve) => {
-        const socket = net.createConnection({ port, host: '127.0.0.1', timeout: 300 });
-        socket.on('connect', () => {
-          socket.destroy();
-          resolve(true);
-        });
-        socket.on('error', () => resolve(false));
-        socket.on('timeout', () => {
-          socket.destroy();
-          resolve(false);
-        });
-      });
-
-    for (const port of [7897, 7890, 10809, 10808]) {
-      if (await probePort(port)) {
-        targetProxy = `http://127.0.0.1:${port}`;
-        break;
-      }
-    }
-  }
-
-  if (targetProxy) {
+  if (envProxy) {
     try {
-      const { ProxyAgent, setGlobalDispatcher } = await import('undici');
-      setGlobalDispatcher(new ProxyAgent(targetProxy));
-      console.log(`🌐 [Proxy] 已自动配置代理通道: ${targetProxy}`);
-    } catch {
-      // 若无 undici，Node 18+ 原生 fetch 在某些环境下仍可使用系统代理
+      const u = new URL(envProxy);
+      activeProxy = { host: u.hostname, port: parseInt(u.port, 10) };
+      console.log(`🌐 [Proxy] 已加载系统环境变量代理: ${envProxy}`);
+      return;
+    } catch {}
+  }
+
+  const probePort = (port) =>
+    new Promise((resolve) => {
+      const socket = net.createConnection({ port, host: '127.0.0.1', timeout: 300 });
+      socket.on('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.on('error', () => resolve(false));
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+
+  for (const port of [7897, 7890, 10809, 10808]) {
+    if (await probePort(port)) {
+      activeProxy = { host: '127.0.0.1', port };
+      console.log(`🌐 [Proxy] 已自动适配网络代理通道: 127.0.0.1:${port}`);
+      break;
     }
   }
+}
+
+/**
+ * 统一网络请求客户端：无需 undici，原生纯 Node.js 支持 HTTP CONNECT 隧道代理
+ */
+function requestUrl(urlStr, options = {}) {
+  const targetUrl = new URL(urlStr);
+
+  if (!activeProxy) {
+    return fetch(urlStr, options);
+  }
+
+  return new Promise((resolve, reject) => {
+    const isHttps = targetUrl.protocol === 'https:';
+    const targetPort = targetUrl.port || (isHttps ? 443 : 80);
+
+    const connectReq = http.request({
+      host: activeProxy.host,
+      port: activeProxy.port,
+      method: 'CONNECT',
+      path: `${targetUrl.hostname}:${targetPort}`
+    });
+
+    connectReq.on('connect', (res, socket) => {
+      let clientReq;
+      const onResponse = (clientRes) => {
+        const chunks = [];
+        clientRes.on('data', (c) => chunks.push(c));
+        clientRes.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          const text = buffer.toString('utf8');
+          resolve({
+            ok: clientRes.statusCode >= 200 && clientRes.statusCode < 300,
+            status: clientRes.statusCode,
+            text: async () => text,
+            json: async () => JSON.parse(text)
+          });
+        });
+      };
+
+      if (isHttps) {
+        const tlsSocket = tls.connect(
+          {
+            host: targetUrl.hostname,
+            socket: socket,
+            servername: targetUrl.hostname
+          },
+          () => {
+            clientReq = https.request(
+              targetUrl,
+              {
+                method: options.method || 'GET',
+                headers: options.headers || {},
+                createConnection: () => tlsSocket
+              },
+              onResponse
+            );
+            clientReq.on('error', reject);
+            if (options.body) clientReq.write(options.body);
+            clientReq.end();
+          }
+        );
+        tlsSocket.on('error', reject);
+      } else {
+        clientReq = http.request(
+          targetUrl,
+          {
+            method: options.method || 'GET',
+            headers: options.headers || {},
+            createConnection: () => socket
+          },
+          onResponse
+        );
+        clientReq.on('error', reject);
+        if (options.body) clientReq.write(options.body);
+        clientReq.end();
+      }
+    });
+
+    connectReq.on('error', (err) => {
+      console.warn(`⚠️ 代理连接失败 (${err.message})，正在尝试直连...`);
+      fetch(urlStr, options).then(resolve).catch(reject);
+    });
+
+    connectReq.end();
+  });
 }
 
 /**
@@ -102,19 +189,20 @@ async function getAccessToken(credentials) {
   const signature = signer.sign(credentials.private_key, 'base64url');
   const jwt = `${unsignedToken}.${signature}`;
 
-  const res = await fetch('https://oauth2.googleapis.com/token', {
+  const res = await requestUrl('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
       assertion: jwt
-    })
+    }).toString()
   });
 
   if (!res.ok) {
     throw new Error(`Google OAuth2 Token 获取失败 (HTTP ${res.status}): ${await res.text()}`);
   }
-  return (await res.json()).access_token;
+  const data = await res.json();
+  return data.access_token;
 }
 
 /**
@@ -124,7 +212,6 @@ async function parseSitemapXml(xmlContent, baseUrl = '') {
   const urls = [];
   const sitemapIndices = [];
 
-  // 1. 判断是否是 sitemapindex（包含子 sitemap）
   const sitemapIndexRegex = /<sitemap>[\s\S]*?<loc>(https?:\/\/[^<]+)<\/loc>[\s\S]*?<\/sitemap>/gi;
   let sitemapMatch;
   while ((sitemapMatch = sitemapIndexRegex.exec(xmlContent)) !== null) {
@@ -136,7 +223,7 @@ async function parseSitemapXml(xmlContent, baseUrl = '') {
     for (const subSitemapUrl of sitemapIndices) {
       try {
         console.log(`  ↳ 拉取子地图: ${subSitemapUrl}`);
-        const res = await fetch(subSitemapUrl);
+        const res = await requestUrl(subSitemapUrl);
         if (res.ok) {
           const subXml = await res.text();
           const subUrls = await parseSitemapXml(subXml, subSitemapUrl);
@@ -151,12 +238,10 @@ async function parseSitemapXml(xmlContent, baseUrl = '') {
     return urls;
   }
 
-  // 2. 普通 sitemap 中的页面 URL 提取
   const urlRegex = /<loc>(https?:\/\/[^<]+)<\/loc>/gi;
   let match;
   while ((match = urlRegex.exec(xmlContent)) !== null) {
     const rawUrl = match[1].trim();
-    // 过滤掉误把 xml 当页面的情况
     if (!rawUrl.endsWith('.xml') && !urls.includes(rawUrl)) {
       urls.push(rawUrl);
     }
@@ -165,25 +250,22 @@ async function parseSitemapXml(xmlContent, baseUrl = '') {
 }
 
 /**
- * 智能获取 URL 列表：支持本地文件、线上 XML 地址、或单个 URL 直接推送
+ * 智能解析 URL 目标
  */
 async function resolveTargetUrls(inputArg) {
-  // 1. 显式传入单个网页 URL（非 xml）
   if (inputArg && /^https?:\/\//i.test(inputArg) && !inputArg.toLowerCase().includes('sitemap') && !inputArg.endsWith('.xml')) {
     console.log(`🎯 识别为单 URL 即时推送模式: ${inputArg}`);
     return [inputArg];
   }
 
-  // 2. 显式传入线上 sitemap 链接
   if (inputArg && /^https?:\/\//i.test(inputArg)) {
     console.log(`🌐 正在从线上站点地图拉取 URL 列表: ${inputArg}`);
-    const res = await fetch(inputArg);
+    const res = await requestUrl(inputArg);
     if (!res.ok) throw new Error(`拉取线上 sitemap 失败 (HTTP ${res.status}): ${await res.text()}`);
     const xml = await res.text();
     return await parseSitemapXml(xml, inputArg);
   }
 
-  // 3. 本地候选路径
   const candidatePaths = inputArg
     ? [path.resolve(process.cwd(), inputArg)]
     : [
@@ -214,11 +296,11 @@ async function resolveTargetUrls(inputArg) {
 }
 
 /**
- * 向 Google Indexing API 发送单条收录请求（带 429 智能重试）
+ * 推送单条 URL
  */
 async function publishUrl(accessToken, url, retryCount = 0) {
   try {
-    const res = await fetch('https://indexing.googleapis.com/v3/urlNotifications:publish', {
+    const res = await requestUrl('https://indexing.googleapis.com/v3/urlNotifications:publish', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -266,7 +348,7 @@ async function runDoctor() {
 
   try {
     const token = await getAccessToken(creds);
-    console.log(`  - Google 身份验证与连通性: ✅ 交换 Token 成功！`);
+    console.log(`  - Google 身份验证与连通性: ✅ 交换 Token 成功！(Token 前 8 位: ${token.substring(0, 8)}...)`);
     console.log(`\n🎉 诊断通过！请确保在 GSC (Google Search Console) 中已将以下邮箱设为站点「所有者 (Owner)」:`);
     console.log(`👉 \x1b[32m${creds.client_email}\x1b[0m\n`);
   } catch (e) {
@@ -280,7 +362,6 @@ async function runDoctor() {
 async function main() {
   const args = process.argv.slice(2);
 
-  // 诊断模式
   if (args.includes('--doctor') || args.includes('doctor')) {
     await runDoctor();
     return;
@@ -296,7 +377,6 @@ async function main() {
   const credentials = getCredentials();
   console.log(`🔑 已就绪服务账号: ${credentials.client_email}`);
 
-  // 演练模式或真实模式
   let accessToken = null;
   if (!isDryRun) {
     accessToken = await getAccessToken(credentials);
@@ -311,7 +391,6 @@ async function main() {
     return;
   }
 
-  // Google 官方每日 200 配额保护与截断
   const DAILY_QUOTA_LIMIT = 200;
   if (targetUrls.length > DAILY_QUOTA_LIMIT) {
     console.warn(`\n⚠️ [配额警告] 共检测到 ${targetUrls.length} 个 URL，超过 Google 默认单日 200 条限制！`);
@@ -340,7 +419,6 @@ async function main() {
       console.log(`❌ 失败: ${resp.error}`);
     }
 
-    // 速率平滑控制：每条请求休眠 150ms，避免触发 Google 突发限流
     if (index < targetUrls.length - 1) {
       await sleep(150);
     }
